@@ -23,6 +23,13 @@ app.use((req, res, next) => {
   next();
 });
 
+app.get("/", (req, res) => {
+  res.status(200).json({
+    status: "ok",
+    message: "Chat backend is running!",
+  });
+});
+
 const userState = [];
 app.post("/new-user", async (request, response) => {
   if (Object.keys(request.body).length === 0) {
@@ -62,7 +69,6 @@ wsServer.on("connection", (ws) => {
   ws.on("message", (msg, isBinary) => {
     const receivedMSG = JSON.parse(msg);
     logger.info(`Message received: ${JSON.stringify(receivedMSG)}`);
-    // обработка выхода пользователя
     if (receivedMSG.type === "exit") {
       const idx = userState.findIndex(
         (user) => user.name === receivedMSG.user.name
@@ -74,7 +80,6 @@ wsServer.on("connection", (ws) => {
       logger.info(`User with name "${receivedMSG.user.name}" has been deleted`);
       return;
     }
-    // обработка отправки сообщения
     if (receivedMSG.type === "send") {
       [...wsServer.clients]
         .filter((o) => o.readyState === WebSocket.OPEN)
