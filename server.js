@@ -65,32 +65,61 @@ app.post("/new-user", async (request, response) => {
 
 const server = http.createServer(app);
 const wsServer = new WebSocketServer({ server });
+
 wsServer.on("connection", (ws) => {
+  ws.send(JSON.stringify({
+    type: "users-list",
+    users: userState
+  }));
+
   ws.on("message", (msg, isBinary) => {
-    const receivedMSG = JSON.parse(msg);
-    logger.info(`Message received: ${JSON.stringify(receivedMSG)}`);
-    if (receivedMSG.type === "exit") {
-      const idx = userState.findIndex(
-        (user) => user.name === receivedMSG.user.name
-      );
-      userState.splice(idx, 1);
-      [...wsServer.clients]
-        .filter((o) => o.readyState === WebSocket.OPEN)
-        .forEach((o) => o.send(JSON.stringify(userState)));
-      logger.info(`User with name "${receivedMSG.user.name}" has been deleted`);
-      return;
-    }
-    if (receivedMSG.type === "send") {
-      [...wsServer.clients]
-        .filter((o) => o.readyState === WebSocket.OPEN)
-        .forEach((o) => o.send(msg, { binary: isBinary }));
-      logger.info("Message sent to all users");
+    try {
+      const receivedMSG = JSON.parse(msg);
+      logger.info(`Message received: ${JSON.stringify(receivedMSG)}`);
+
+      if (receivedMSG.type === "new-user") {
+        const isExist = userState.find(user => user.name === receivedMSG.user.name);
+        if (!isExist) {
+          userState.push(receivedMSG.user);
+          broadcastUsersList();
+        }
+      } 
+      else if (receivedMSG.type === "exit") {
+        const idx = userState.findIndex(user => user.name === receivedMSG.user.name);
+        if (idx !== -1) {
+          userState.splice(idx, 1);
+          broadcastUsersList();
+          logger.info(`User with name "${receivedMSG.user.name}" has been deleted`);
+        }
+      } 
+      else if (receivedMSG.type === "get-users") {
+        ws.send(JSON.stringify({
+          type: "users-list",
+          users: userState
+        }));
+      } 
+      else if (receivedMSG.type === "send") {
+        [...wsServer.clients]
+          .filter(client => client.readyState === WebSocket.OPEN)
+          .forEach(client => client.send(msg, { binary: isBinary }));
+        logger.info("Message sent to all users");
+      }
+    } catch (e) {
+      logger.error(`Error processing message: ${e.message}`);
     }
   });
-  [...wsServer.clients]
-    .filter((o) => o.readyState === WebSocket.OPEN)
-    .forEach((o) => o.send(JSON.stringify(userState)));
 });
+
+function broadcastUsersList() {
+  const message = JSON.stringify({
+    type: "users-list",
+    users: userState
+  });
+  
+  [...wsServer.clients]
+    .filter(client => client.readyState === WebSocket.OPEN)
+    .forEach(client => client.send(message));
+}
 
 const port = process.env.PORT || 3000;
 
