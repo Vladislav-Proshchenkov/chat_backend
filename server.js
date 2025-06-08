@@ -31,6 +31,7 @@ app.get("/", (req, res) => {
 });
 
 const userState = [];
+
 app.post("/new-user", async (request, response) => {
   if (Object.keys(request.body).length === 0) {
     const result = {
@@ -38,9 +39,12 @@ app.post("/new-user", async (request, response) => {
       message: "This name is already taken!",
     };
     response.status(400).send(JSON.stringify(result)).end();
+    return;
   }
+
   const { name } = request.body;
-  const isExist = userState.find((user) => user.name === name);
+  const isExist = userState.find((user) => user.name.toLowerCase() === name.toLowerCase());
+  
   if (!isExist) {
     const newUser = {
       id: randomUUID(),
@@ -58,13 +62,26 @@ app.post("/new-user", async (request, response) => {
       status: "error",
       message: "This name is already taken!",
     };
-    logger.error(`User with name "${name}" already exist`);
+    logger.error(`User with name "${name}" already exists`);
     response.status(409).send(JSON.stringify(result)).end();
   }
 });
 
 const server = http.createServer(app);
 const wsServer = new WebSocketServer({ server });
+
+function broadcastUsersList() {
+  const message = JSON.stringify({
+    type: "users-list",
+    users: userState
+  });
+  
+  wsServer.clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(message);
+    }
+  });
+}
 
 wsServer.on("connection", (ws) => {
   ws.send(JSON.stringify({
@@ -78,18 +95,28 @@ wsServer.on("connection", (ws) => {
       logger.info(`Message received: ${JSON.stringify(receivedMSG)}`);
 
       if (receivedMSG.type === "new-user") {
-        const isExist = userState.find(user => user.name === receivedMSG.user.name);
+        const isExist = userState.find(user => 
+          user.name.toLowerCase() === receivedMSG.user.name.toLowerCase()
+        );
+        
         if (!isExist) {
           userState.push(receivedMSG.user);
           broadcastUsersList();
+        } else {
+          ws.send(JSON.stringify({
+            type: "nickname-error",
+            message: "Этот никнейм уже занят"
+          }));
         }
       } 
       else if (receivedMSG.type === "exit") {
-        const idx = userState.findIndex(user => user.name === receivedMSG.user.name);
+        const idx = userState.findIndex(user => 
+          user.name.toLowerCase() === receivedMSG.user.name.toLowerCase()
+        );
         if (idx !== -1) {
           userState.splice(idx, 1);
           broadcastUsersList();
-          logger.info(`User with name "${receivedMSG.user.name}" has been deleted`);
+          logger.info(`User "${receivedMSG.user.name}" left the chat`);
         }
       } 
       else if (receivedMSG.type === "get-users") {
@@ -99,37 +126,33 @@ wsServer.on("connection", (ws) => {
         }));
       } 
       else if (receivedMSG.type === "send") {
-        [...wsServer.clients]
-          .filter(client => client.readyState === WebSocket.OPEN)
-          .forEach(client => client.send(msg, { binary: isBinary }));
-        logger.info("Message sent to all users");
+        wsServer.clients.forEach(client => {
+          if (client.readyState === WebSocket.OPEN) {
+            client.send(msg, { binary: isBinary });
+          }
+        });
+        logger.info("Message broadcasted to all users");
       }
     } catch (e) {
       logger.error(`Error processing message: ${e.message}`);
     }
   });
-});
 
-function broadcastUsersList() {
-  const message = JSON.stringify({
-    type: "users-list",
-    users: userState
+  ws.on("close", () => {
+    logger.info("Client disconnected");
   });
-  
-  [...wsServer.clients]
-    .filter(client => client.readyState === WebSocket.OPEN)
-    .forEach(client => client.send(message));
-}
+});
 
 const port = process.env.PORT || 3000;
 
 const bootstrap = async () => {
   try {
     server.listen(port, () =>
-      logger.info(`Server has been started on http://localhost:${port}`)
+      logger.info(`Server is running on http://localhost:${port}`)
     );
   } catch (error) {
-    logger.error(`Error: ${error.message}`);
+    logger.error(`Server error: ${error.message}`);
+    process.exit(1);
   }
 };
 
